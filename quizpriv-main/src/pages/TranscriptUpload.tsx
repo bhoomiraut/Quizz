@@ -7,7 +7,8 @@ export function TranscriptUpload() {
   const [processingStep, setProcessingStep] = useState(0);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [preprocessTranscript, setPreprocessTranscript] = useState(false);
-  const [questionType, setQuestionType] = useState<'single' | 'multiple'>('single');
+  const [questionType, setQuestionType] = useState<'single' | 'multiple' | 'mixed'>('single');
+  const [singleCorrectPercentage, setSingleCorrectPercentage] = useState(50);
   const [numOptions, setNumOptions] = useState(4);
   const [numQuestions, setNumQuestions] = useState(40);
   const [difficulty, setDifficulty] = useState<'Easy' | 'Medium' | 'Hard'>('Medium');
@@ -20,6 +21,8 @@ export function TranscriptUpload() {
   const [isCompleted, setIsCompleted] = useState(false);
   const [generatedData, setGeneratedData] = useState<any>(null);
   const [progress, setProgress] = useState(0);
+  const [hasGeneratedSession, setHasGeneratedSession] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   // Load form state from localStorage on mount
   useEffect(() => {
@@ -28,56 +31,78 @@ export function TranscriptUpload() {
       try {
         const state = JSON.parse(savedState);
         setQuestionType(state.questionType || 'single');
+        setSingleCorrectPercentage(state.singleCorrectPercentage || 50);
         setNumOptions(state.numOptions || 4);
         setNumQuestions(state.numQuestions || 40);
         setDifficulty(state.difficulty || 'Medium');
         setShowAdvancedOptions(state.showAdvancedOptions || false);
         setPreprocessTranscript(state.preprocessTranscript || false);
-        setIsCompleted(state.isCompleted || false);
         
-        // Restore processing step
-        if (state.processingStep !== undefined) {
-          setProcessingStep(state.processingStep);
-        }
-        
-        // Restore file info if available
-        if (state.fileInfo) {
-          const mockFile = new File([], state.fileInfo.name, { type: state.fileInfo.type });
-          setFile(mockFile);
-        }
-        
-        // Restore generated data
-        if (state.generatedData) {
+        // ONLY restore completed state if we have actual generated data
+        // This prevents showing empty file names or incomplete states
+        if (state.isCompleted && state.generatedData) {
+          setIsCompleted(true);
           setGeneratedData(state.generatedData);
+          setHasGeneratedSession(true);
+          
+          // Only restore file info if we have completed generation
+          if (state.fileInfo) {
+            const mockFile = new File([], state.fileInfo.name, { type: state.fileInfo.type });
+            setFile(mockFile);
+          }
+          
+          // Restore processing step only if completed
+          if (state.processingStep !== undefined) {
+            setProcessingStep(state.processingStep);
+          }
+          
+          console.log('✅ Completed state restored:', {
+            isCompleted: true,
+            fileName: state.fileInfo?.name,
+            totalQuestions: state.generatedData?.total_questions,
+            processingStep: state.processingStep
+          });
+        } else {
+          // If not completed or no data, ensure clean slate
+          setIsCompleted(false);
+          setGeneratedData(null);
+          setFile(null);
+          setProcessingStep(0);
+          setHasGeneratedSession(false);
+          console.log('📝 Clean slate - no completed generation found');
         }
-        
-        console.log('✅ State restored:', {
-          isCompleted: state.isCompleted,
-          hasFile: !!state.fileInfo,
-          hasData: !!state.generatedData,
-          processingStep: state.processingStep
-        });
         
         console.log('Restored form state from localStorage');
       } catch (e) {
         console.error('Failed to parse saved state:', e);
+        // On error, clean slate
+        localStorage.removeItem('transcriptUploadState');
       }
     }
+    
+    // 🔑 Mark hydration complete
+    setIsHydrated(true);
   }, []);
 
   // Save form state to localStorage whenever it changes
   useEffect(() => {
+    // ⛔ STOP EARLY SAVE - wait for hydration to complete
+    if (!isHydrated) return;
+    
+    // Only save completion state if we actually have generated data
     const state = {
       questionType,
+      singleCorrectPercentage,
       numOptions,
       numQuestions,
       difficulty,
       showAdvancedOptions,
       preprocessTranscript,
-      isCompleted,
-      processingStep,
-      fileInfo: file ? { name: file.name, type: file.type, size: file.size } : null,
-      generatedData
+      isCompleted: isCompleted && generatedData ? true : false,
+      hasGeneratedSession,
+      processingStep: isCompleted && generatedData ? processingStep : 0,
+      fileInfo: (isCompleted && generatedData && file) ? { name: file.name, type: file.type, size: file.size } : null,
+      generatedData: generatedData || null
     };
     localStorage.setItem('transcriptUploadState', JSON.stringify(state));
     
@@ -86,10 +111,11 @@ export function TranscriptUpload() {
       console.log('💾 Saving completion state to localStorage:', {
         isCompleted,
         hasData: !!generatedData,
-        fileName: file?.name
+        fileName: file?.name,
+        totalQuestions: generatedData?.total_questions
       });
     }
-  }, [questionType, numOptions, numQuestions, difficulty, showAdvancedOptions, preprocessTranscript, isCompleted, processingStep, file, generatedData]);
+  }, [isHydrated, questionType, singleCorrectPercentage, numOptions, numQuestions, difficulty, showAdvancedOptions, preprocessTranscript, isCompleted, hasGeneratedSession, processingStep, file, generatedData]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -221,6 +247,11 @@ export function TranscriptUpload() {
         difficulty: difficulty.toLowerCase()
       });
       
+      // Add percentage for mixed mode
+      if (questionType === 'mixed') {
+        queryParams.append('single_correct_percentage', singleCorrectPercentage.toString());
+      }
+      
       const response = await fetch(`/api/generate-questions?${queryParams}`, {
         method: 'POST',
         body: formData,
@@ -250,10 +281,18 @@ export function TranscriptUpload() {
       
       // Store the generated questions and data
       localStorage.setItem('generatedQuestions', JSON.stringify(data.questions));
+      
+      // 🔥 CRITICAL: Save question_set_id for AI validation workflow
+      if (data.question_set_id) {
+        localStorage.setItem('ai_validation_question_set_id', data.question_set_id);
+        console.log('✅ Saved question_set_id for AI validation:', data.question_set_id);
+      }
+      
       setGeneratedData(data);
       
       setProcessingStep(preprocessTranscript ? 4 : 3);
       setIsCompleted(true);
+      setHasGeneratedSession(true);
       setError(null);
       showToastMessage(`✅ Generated ${data.total_questions} questions successfully!`);
     } catch (err) {
@@ -273,6 +312,7 @@ export function TranscriptUpload() {
     setFile(null);
     setIsCompleted(false);
     setGeneratedData(null);
+    setHasGeneratedSession(false);
     setProcessingStep(0);
     setError(null);
     setPreprocessedTranscript(null);
@@ -311,7 +351,7 @@ export function TranscriptUpload() {
   ];
 
   // Debug render
-  console.log('🎨 Rendering TranscriptUpload:', { isCompleted, hasData: !!generatedData, fileName: file?.name });
+  console.log('🎨 Rendering TranscriptUpload:', { hasGeneratedSession, isCompleted, hasData: !!generatedData, fileName: file?.name });
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -323,7 +363,7 @@ export function TranscriptUpload() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          {isCompleted && generatedData ? (
+          {hasGeneratedSession && generatedData ? (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
@@ -391,7 +431,8 @@ export function TranscriptUpload() {
               </div>
             </div>
           ) : (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+              {/* File Upload Section */}
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -525,7 +566,7 @@ export function TranscriptUpload() {
                           className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                         />
                         <span className="text-sm text-gray-700">
-                          MCQs (one correct answer)
+                          Single Correct Answer
                         </span>
                       </label>
                       <label className="flex items-center gap-3 cursor-pointer">
@@ -536,10 +577,56 @@ export function TranscriptUpload() {
                           className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                         />
                         <span className="text-sm text-gray-700">
-                          MCQs (multiple correct answers)
+                          Multiple Correct Answers
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="radio"
+                          checked={questionType === 'mixed'}
+                          onChange={() => setQuestionType('mixed')}
+                          className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700">
+                          Mixed (Both Types)
                         </span>
                       </label>
                     </div>
+                    
+                    {/* Percentage Slider for Mixed Mode */}
+                    {questionType === 'mixed' && (
+                      <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <label className="text-sm font-medium text-gray-700 mb-3 block">
+                          Question Distribution
+                        </label>
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-4">
+                            <div className="flex-1">
+                              <div className="flex justify-between text-xs text-gray-600 mb-2">
+                                <span>Single Correct: {singleCorrectPercentage}%</span>
+                                <span>Multiple Correct: {100 - singleCorrectPercentage}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="10"
+                                value={singleCorrectPercentage}
+                                onChange={(e) => setSingleCorrectPercentage(parseInt(e.target.value))}
+                                className="w-full h-2 bg-gradient-to-r from-green-400 to-purple-400 rounded-lg appearance-none cursor-pointer"
+                                style={{
+                                  background: `linear-gradient(to right, #4ade80 0%, #4ade80 ${singleCorrectPercentage}%, #c084fc ${singleCorrectPercentage}%, #c084fc 100%)`
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded">← Single</span>
+                            <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">Multiple →</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Edit2, Trash2, Check, Copy, Search, RefreshCw, Download, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Edit2, Trash2, Check, Copy, Search, Save, Download, AlertCircle, Brain, X, CheckCircle } from 'lucide-react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 interface Question {
   id: string | number;
@@ -11,6 +13,7 @@ interface Question {
   subtopic: string;
   explanation?: string;
   marks?: number;
+  chunk_index?: number;
 }
 
 interface QuestionSet {
@@ -33,7 +36,16 @@ export function QuestionBank() {
   const [expandedSubtopics, setExpandedSubtopics] = useState<Set<string>>(new Set());
   const [selectedDifficulties, setSelectedDifficulties] = useState<Set<string>>(new Set(['easy', 'medium', 'hard']));
   const [selectedSubtopics, setSelectedSubtopics] = useState<Set<string>>(new Set());
+  const [selectedQuestionTypes, setSelectedQuestionTypes] = useState<Set<string>>(new Set(['single', 'multiple']));
   const [expandedAnswers, setExpandedAnswers] = useState<Set<string>>(new Set());
+  const [editingQuestion, setEditingQuestion] = useState<string | null>(null);
+  const [editedData, setEditedData] = useState<Partial<Question>>({});
+  const [hasChanges, setHasChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [currentQuestionSetId, setCurrentQuestionSetId] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
   // Fetch questions from backend API
   useEffect(() => {
@@ -56,6 +68,11 @@ export function QuestionBank() {
         const latestSet = allSets.length > 0 ? [allSets[0]] : [];
         
         setQuestionSets(latestSet);
+        
+        // Store the current question set ID for updates
+        if (latestSet.length > 0) {
+          setCurrentQuestionSetId(latestSet[0]._id);
+        }
         
         // Flatten questions from the most recent set only
         const questions: Question[] = [];
@@ -83,6 +100,13 @@ export function QuestionBank() {
     fetchQuestions();
   }, []);
 
+  const showToastMessage = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
   const subtopics = Array.from(new Set(allQuestions.map(q => q.subtopic).filter(Boolean)));
 
   const getSubtopicCount = (subtopic: string) => {
@@ -109,6 +133,16 @@ export function QuestionBank() {
     setSelectedDifficulties(newDifficulties);
   };
 
+  const toggleQuestionType = (type: string) => {
+    const newTypes = new Set(selectedQuestionTypes);
+    if (newTypes.has(type)) {
+      newTypes.delete(type);
+    } else {
+      newTypes.add(type);
+    }
+    setSelectedQuestionTypes(newTypes);
+  };
+
   const toggleSubtopicFilter = (subtopic: string) => {
     const newSubtopics = new Set(selectedSubtopics);
     if (newSubtopics.has(subtopic)) {
@@ -129,10 +163,178 @@ export function QuestionBank() {
     setExpandedAnswers(newExpanded);
   };
 
+  // Edit question handler
+  const handleEdit = (question: Question) => {
+    setEditingQuestion(String(question.id));
+    setEditedData({...question});
+  };
+
+  // Save edited question
+  const handleSaveEdit = () => {
+    if (!editingQuestion) return;
+    
+    setAllQuestions(prev => prev.map(q => 
+      String(q.id) === editingQuestion 
+        ? { ...q, ...editedData } as Question
+        : q
+    ));
+    
+    setEditingQuestion(null);
+    setEditedData({});
+    setHasChanges(true);
+  };
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setEditingQuestion(null);
+    setEditedData({});
+  };
+
+  // Copy/Duplicate question
+  const handleCopy = (question: Question) => {
+    const newId = `${Date.now()}_${Math.random()}`;
+    const copiedQuestion = {
+      ...question,
+      id: newId,
+      question: `${question.question} (Copy)`
+    };
+    
+    setAllQuestions(prev => [...prev, copiedQuestion]);
+    setHasChanges(true);
+  };
+
+  // Delete question
+  const handleDelete = (questionId: string | number) => {
+    setAllQuestions(prev => prev.filter(q => String(q.id) !== String(questionId)));
+    setHasChanges(true);
+    showToastMessage('Question deleted successfully');
+  };
+
+  // Update questions in MongoDB
+  const handleUpdateQuestions = async () => {
+    if (!currentQuestionSetId) {
+      showToastMessage('No question set found to update', 'error');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await fetch(`http://127.0.0.1:8001/api/question-sets/${currentQuestionSetId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          questions: allQuestions
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update questions');
+      }
+
+      setHasChanges(false);
+      showToastMessage('Questions updated successfully!');
+    } catch (err) {
+      console.error('Error updating questions:', err);
+      showToastMessage('Failed to update questions. Please try again.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Navigate to AI Answering page
+  const handleAIAnswering = () => {
+    if (!currentQuestionSetId) {
+      showToastMessage('No question set available', 'error');
+      return;
+    }
+    
+    // Store question set ID in localStorage for AI Answering page
+    localStorage.setItem('ai_validation_question_set_id', currentQuestionSetId);
+    
+    // Trigger navigation to AI Quiz Answering page
+    // This works by dispatching a custom event that App.tsx can listen to
+    window.dispatchEvent(new CustomEvent('navigate', { detail: 'ai-quiz' }));
+  };
+
+  // Export to PDF
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
+    const margin = 15;
+    let yPosition = margin;
+
+    // Title
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Question Bank', margin, yPosition);
+    yPosition += 10;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total Questions: ${allQuestions.length}`, margin, yPosition);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, pageWidth - margin - 60, yPosition);
+    yPosition += 15;
+
+    // Questions
+    filteredQuestions.forEach((q, index) => {
+      // Check if we need a new page
+      if (yPosition > pageHeight - 40) {
+        doc.addPage();
+        yPosition = margin;
+      }
+
+      // Question number and text
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      const questionText = `Q${index + 1}. ${q.question}`;
+      const questionLines = doc.splitTextToSize(questionText, pageWidth - 2 * margin);
+      doc.text(questionLines, margin, yPosition);
+      yPosition += questionLines.length * 5 + 3;
+
+      // Options
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      q.options?.forEach((opt, idx) => {
+        if (yPosition > pageHeight - 30) {
+          doc.addPage();
+          yPosition = margin;
+        }
+        const cleanText = cleanOptionText(opt);
+        const optionText = `  ${String.fromCharCode(65 + idx)}. ${cleanText}`;
+        const optionLines = doc.splitTextToSize(optionText, pageWidth - 2 * margin - 5);
+        doc.text(optionLines, margin + 5, yPosition);
+        yPosition += optionLines.length * 4.5 + 2;
+      });
+
+      // Correct answer (replace \n with comma for PDF)
+      doc.setFont('helvetica', 'italic');
+      const correctAnswer = `Correct: ${formatCorrectAnswer(q).replace(/\n/g, ', ')}`;
+      doc.text(correctAnswer, margin + 5, yPosition);
+      yPosition += 6;
+
+      // Metadata
+      doc.setFontSize(8);
+      doc.setTextColor(100);
+      doc.text(`Difficulty: ${q.difficulty} | Subtopic: ${q.subtopic}`, margin + 5, yPosition);
+      doc.setTextColor(0);
+      yPosition += 10;
+    });
+
+    doc.save(`question-bank-${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
   const filteredQuestions = allQuestions.filter(q => {
     const qDifficulty = q.difficulty?.toLowerCase() || 'medium';
     if (!selectedDifficulties.has(qDifficulty)) return false;
     if (selectedSubtopics.size > 0 && !selectedSubtopics.has(q.subtopic)) return false;
+    
+    // Filter by question type
+    const qType = q.type?.toLowerCase() || 'single';
+    if (!selectedQuestionTypes.has(qType)) return false;
+    
     return true;
   });
 
@@ -155,15 +357,37 @@ export function QuestionBank() {
     }
   };
 
+  // Clean option text by removing redundant prefixes like "A)", "1.", etc.
+  const cleanOptionText = (text: string): string => {
+    if (!text) return text;
+    
+    // Remove patterns like "A)", "B)", "1.", "2)", etc. from the start
+    return text
+      .replace(/^[A-Za-z]\)\s*/, '')  // Remove "A) ", "B) ", etc.
+      .replace(/^[A-Za-z]\.\s*/, '')  // Remove "A. ", "B. ", etc.
+      .replace(/^\d+\.\s*/, '')       // Remove "1. ", "2. ", etc.
+      .replace(/^\d+\)\s*/, '')       // Remove "1) ", "2) ", etc.
+      .trim();
+  };
+
   const formatCorrectAnswer = (question: Question) => {
     if (!question.options || !question.correct_options) return 'N/A';
     
-    const correctTexts = question.correct_options.map(idx => {
-      const letter = String.fromCharCode(65 + idx); // A, B, C, D...
-      return `${letter}. ${question.options[idx]}`;
-    });
+    const correctTexts = question.correct_options
+      .filter(idx => idx >= 0 && idx < question.options.length) // Filter out invalid indices
+      .map(idx => {
+        const letter = String.fromCharCode(65 + idx); // A, B, C, D...
+        const optionText = question.options[idx];
+        if (!optionText) return null; // Skip if option is undefined
+        const cleanText = cleanOptionText(optionText);
+        return `${letter}. ${cleanText}`;
+      })
+      .filter(text => text !== null); // Remove null entries
     
-    return correctTexts.join(', ');
+    if (correctTexts.length === 0) return 'N/A';
+    
+    // Join with line breaks for multiple answers instead of comma
+    return correctTexts.join('\n');
   };
 
   if (loading) {
@@ -227,13 +451,43 @@ export function QuestionBank() {
         </div>
 
         <div className="flex gap-3">
-          <button className="px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" />
-            Regenerate Questions
+          <button 
+            onClick={handleUpdateQuestions}
+            disabled={!hasChanges || isSaving}
+            className={`px-4 py-2.5 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 ${
+              hasChanges && !isSaving
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {isSaving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                Update Questions
+                {hasChanges && <span className="ml-1 px-1.5 py-0.5 bg-white/20 rounded text-xs">*</span>}
+              </>
+            )}
           </button>
-          <button className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2">
+          <button 
+            onClick={handleAIAnswering}
+            disabled={!currentQuestionSetId || hasChanges}
+            className="px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={hasChanges ? "Save changes before AI validation" : "Validate questions with AI"}
+          >
+            <Brain className="w-4 h-4" />
+            AI Answering
+          </button>
+          <button 
+            onClick={handleExportPDF}
+            className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2"
+          >
             <Download className="w-4 h-4" />
-            Export (CSV/PDF)
+            Export PDF
           </button>
         </div>
       </div>
@@ -285,6 +539,34 @@ export function QuestionBank() {
                 </div>
               </div>
 
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-3 block">
+                  Question Type
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => toggleQuestionType('single')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                      selectedQuestionTypes.has('single')
+                        ? 'bg-green-100 text-green-700 border-green-200'
+                        : 'bg-gray-50 text-gray-400 border-gray-200'
+                    }`}
+                  >
+                    Single Correct
+                  </button>
+                  <button
+                    onClick={() => toggleQuestionType('multiple')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                      selectedQuestionTypes.has('multiple')
+                        ? 'bg-purple-100 text-purple-700 border-purple-200'
+                        : 'bg-gray-50 text-gray-400 border-gray-200'
+                    }`}
+                  >
+                    Multiple Correct
+                  </button>
+                </div>
+              </div>
+
               <div className="pt-4 border-t border-gray-200">
                 <p className="text-xs text-gray-500">
                   Total: {allQuestions.length} questions across {subtopics.length} subtopics
@@ -324,79 +606,201 @@ export function QuestionBank() {
                   <div className="border-t border-gray-200">
                     {questions.map((question) => {
                       const questionId = String(question.id);
+                      const isEditing = editingQuestion === questionId;
+                      
                       return (
                         <div
                           key={questionId}
-                          className="p-6 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors"
+                          className={`p-6 border-b border-gray-100 last:border-b-0 transition-colors ${
+                            isEditing ? 'bg-blue-50' : 'hover:bg-gray-50'
+                          }`}
                         >
-                          <div className="flex items-start justify-between gap-4 mb-3">
-                            <p className="text-gray-900 flex-1 leading-relaxed">
-                              {question.question}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <button className="p-2 hover:bg-white rounded-lg transition-colors" title="Edit">
-                                <Edit2 className="w-4 h-4 text-gray-400" />
-                              </button>
-                              <button className="p-2 hover:bg-white rounded-lg transition-colors" title="Duplicate">
-                                <Copy className="w-4 h-4 text-gray-400" />
-                              </button>
-                              <button className="p-2 hover:bg-white rounded-lg transition-colors" title="Delete">
-                                <Trash2 className="w-4 h-4 text-red-400" />
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 mb-3 flex-wrap">
-                            <span className={`px-3 py-1 rounded-lg text-xs font-medium border capitalize ${getDifficultyColor(question.difficulty)}`}>
-                              {question.difficulty}
-                            </span>
-                            <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium">
-                              {question.subtopic}
-                            </span>
-                            <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-medium capitalize">
-                              {question.type}
-                            </span>
-                            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium">
-                              {question.options?.length || 0} options
-                            </span>
-                          </div>
-
-                          {/* Options preview */}
-                          <div className="mt-3 mb-3">
-                            {question.options && question.options.map((option, idx) => (
-                              <div key={idx} className="flex items-start gap-2 py-1.5">
-                                <span className="text-xs font-medium text-gray-500 mt-0.5">
-                                  {String.fromCharCode(65 + idx)}.
-                                </span>
-                                <span className="text-sm text-gray-700">{option}</span>
+                          {isEditing ? (
+                            // EDIT MODE
+                            <div className="space-y-4">
+                              {/* Question Text */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Question:
+                                </label>
+                                <textarea
+                                  value={editedData.question || ''}
+                                  onChange={(e) => setEditedData({...editedData, question: e.target.value})}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  rows={3}
+                                />
                               </div>
-                            ))}
-                          </div>
 
-                          {expandedAnswers.has(questionId) ? (
-                            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
-                              <p className="text-sm font-medium text-gray-900 mb-2">Correct Answer:</p>
-                              <p className="text-sm text-gray-700 mb-3">{formatCorrectAnswer(question)}</p>
-                              {question.explanation && (
-                                <>
-                                  <p className="text-sm font-medium text-gray-900 mb-2">Explanation:</p>
-                                  <p className="text-xs text-gray-600 italic">{question.explanation}</p>
-                                </>
-                              )}
-                              <button
-                                onClick={() => toggleAnswer(questionId)}
-                                className="mt-3 text-xs text-blue-600 hover:text-blue-700 font-medium"
-                              >
-                                Hide answer
-                              </button>
+                              {/* Options */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Options:
+                                </label>
+                                {editedData.options?.map((opt, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 mb-2">
+                                    <span className="text-sm font-medium text-gray-500 w-6">
+                                      {String.fromCharCode(65 + idx)}.
+                                    </span>
+                                    <input
+                                      type="text"
+                                      value={opt}
+                                      onChange={(e) => {
+                                        const newOptions = [...(editedData.options || [])];
+                                        newOptions[idx] = e.target.value;
+                                        setEditedData({...editedData, options: newOptions});
+                                      }}
+                                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Correct Answer */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Correct Answer:
+                                </label>
+                                <select
+                                  value={editedData.correct_options?.[0] || 0}
+                                  onChange={(e) => setEditedData({...editedData, correct_options: [parseInt(e.target.value)]})}
+                                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                  {editedData.options?.map((_, idx) => (
+                                    <option key={idx} value={idx}>
+                                      {String.fromCharCode(65 + idx)}. {editedData.options?.[idx]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Difficulty */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Difficulty:
+                                </label>
+                                <div className="flex gap-2">
+                                  {['easy', 'medium', 'hard'].map((diff) => (
+                                    <button
+                                      key={diff}
+                                      onClick={() => setEditedData({...editedData, difficulty: diff})}
+                                      className={`px-4 py-2 rounded-lg text-sm font-medium border capitalize transition-colors ${
+                                        editedData.difficulty === diff
+                                          ? getDifficultyColor(diff)
+                                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                                      }`}
+                                    >
+                                      {diff}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Action Buttons */}
+                              <div className="flex gap-2 pt-2">
+                                <button
+                                  onClick={handleSaveEdit}
+                                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
+                                >
+                                  <Check className="w-4 h-4" />
+                                  Save Changes
+                                </button>
+                                <button
+                                  onClick={handleCancelEdit}
+                                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium flex items-center gap-2"
+                                >
+                                  <X className="w-4 h-4" />
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
                           ) : (
-                            <button
-                              onClick={() => toggleAnswer(questionId)}
-                              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                              Show answer & explanation
-                            </button>
+                            // VIEW MODE
+                            <>
+                              <div className="flex items-start justify-between gap-4 mb-3">
+                                <p className="text-gray-900 flex-1 leading-relaxed">
+                                  {question.question}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={() => handleEdit(question)}
+                                    className="p-2 hover:bg-white rounded-lg transition-colors" 
+                                    title="Edit"
+                                  >
+                                    <Edit2 className="w-4 h-4 text-gray-400 hover:text-blue-600" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleCopy(question)}
+                                    className="p-2 hover:bg-white rounded-lg transition-colors" 
+                                    title="Duplicate"
+                                  >
+                                    <Copy className="w-4 h-4 text-gray-400 hover:text-green-600" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDelete(question.id)}
+                                    className="p-2 hover:bg-white rounded-lg transition-colors" 
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                <span className={`px-3 py-1 rounded-lg text-xs font-medium border capitalize ${getDifficultyColor(question.difficulty)}`}>
+                                  {question.difficulty}
+                                </span>
+                                <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium">
+                                  {question.subtopic}
+                                </span>
+                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-medium capitalize">
+                                  {question.type}
+                                </span>
+                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium">
+                                  {question.options?.length || 0} options
+                                </span>
+                              </div>
+
+                              {/* Options preview */}
+                              <div className="mt-3 mb-3">
+                                {question.options && question.options.map((option, idx) => {
+                                  const cleanText = cleanOptionText(option);
+                                  return (
+                                    <div key={idx} className="flex items-start gap-2 py-1.5">
+                                      <span className="text-xs font-medium text-gray-500 mt-0.5">
+                                        {String.fromCharCode(65 + idx)}.
+                                      </span>
+                                      <span className="text-sm text-gray-700">{cleanText}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {expandedAnswers.has(questionId) ? (
+                                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                                  <p className="text-sm font-medium text-gray-900 mb-2">Correct Answer:</p>
+                                  <div className="text-sm text-gray-700 mb-3 whitespace-pre-line">{formatCorrectAnswer(question)}</div>
+                                  {question.explanation && (
+                                    <>
+                                      <p className="text-sm font-medium text-gray-900 mb-2">Explanation:</p>
+                                      <p className="text-xs text-gray-600 italic">{question.explanation}</p>
+                                    </>
+                                  )}
+                                  <button
+                                    onClick={() => toggleAnswer(questionId)}
+                                    className="mt-3 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                  >
+                                    Hide answer
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => toggleAnswer(questionId)}
+                                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                                >
+                                  Show answer & explanation
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       );
@@ -408,6 +812,16 @@ export function QuestionBank() {
           })}
         </div>
       </div>
+
+      {/* Toast Notification */}
+      {showToast && (
+        <div className={`fixed bottom-8 right-8 ${
+          toastType === 'success' ? 'bg-green-600' : 'bg-red-600'
+        } text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-slide-up z-50`}>
+          <CheckCircle className="w-5 h-5" />
+          <span className="font-medium">{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

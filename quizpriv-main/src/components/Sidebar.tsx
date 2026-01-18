@@ -1,4 +1,4 @@
-import { Upload, FileText, MessageSquare, BarChart3 } from 'lucide-react';
+import { Upload, FileText, MessageSquare } from 'lucide-react';
 
 interface SidebarProps {
   currentPage: string;
@@ -10,7 +10,6 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     { id: 'upload', label: 'Transcript Upload', icon: Upload },
     { id: 'questions', label: 'Question Bank', icon: FileText },
     { id: 'ai-quiz', label: 'AI Quiz Answering', icon: MessageSquare },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   ];
 
   return (

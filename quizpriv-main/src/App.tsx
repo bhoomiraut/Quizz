@@ -1,12 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { TranscriptUpload } from './pages/TranscriptUpload';
 import { QuestionBank } from './pages/QuestionBank';
 import { AIQuizAnswering } from './pages/AIQuizAnswering';
-import { PerformanceAnalytics } from './pages/PerformanceAnalytics';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('upload');
+  
+  // Listen for navigation events from child components
+  useEffect(() => {
+    const handleNavigate = (event: CustomEvent) => {
+      setCurrentPage(event.detail);
+    };
+    
+    window.addEventListener('navigate', handleNavigate as EventListener);
+    return () => window.removeEventListener('navigate', handleNavigate as EventListener);
+  }, []);
 
   const getPageTitle = () => {
     switch (currentPage) {
@@ -16,8 +25,6 @@ function App() {
         return 'Question Bank';
       case 'ai-quiz':
         return 'AI Quiz Answering';
-      case 'analytics':
-        return 'User Performance & Analytics';
       default:
         return 'Dashboard';
     }
@@ -31,8 +38,6 @@ function App() {
         return <QuestionBank />;
       case 'ai-quiz':
         return <AIQuizAnswering />;
-      case 'analytics':
-        return <PerformanceAnalytics />;
       default:
         return <TranscriptUpload />;
     }
