@@ -127,7 +127,15 @@ export function AIQuizAnswering() {
       });
 
       if (!response.ok) {
-        throw new Error('Validation failed');
+        const text = await response.text();
+        let errorMessage = 'Validation failed';
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       const data: ValidationResponse = await response.json();

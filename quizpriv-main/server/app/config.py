@@ -1,18 +1,10 @@
-# server/app/config.py
-"""
-Industry-level configuration for Quiz Generator.
-Essential parameters that significantly impact performance and quality.
-"""
 
 # ==================== MODEL CONFIGURATION ====================
 # Choose from available models (Meta LLaMA or OpenAI OSS)
 
 # GENERATION MODEL (Question Generation)
-GROQ_MODEL_NAME = "llama-3.1-8b-instant"  # Fast & cost-efficient
-# Alternative options:
-# "llama-3.3-70b-versatile"  # Better quality, slower, higher cost
-# "openai/gpt-oss-20b"       # OpenAI OSS model
-# "openai/gpt-oss-120b"      # Highest quality, highest cost
+GROQ_MODEL_NAME = "llama-3.1-8b-instant" 
+
 
 
 # ==================== TEXT CHUNKING ====================

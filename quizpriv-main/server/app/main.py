@@ -117,6 +117,33 @@ def fuzzy_similarity(a: str, b: str) -> float:
     return fuzz.token_set_ratio(a, b) / 100.0
 
 
+def decode_text_file(raw_bytes: bytes) -> str:
+    """
+    Robust text file decoding with automatic encoding detection.
+    Handles UTF-8, UTF-16LE (Windows), UTF-16BE, Latin-1, and others.
+    """
+    # Try common encodings in order of likelihood
+    encodings = [
+        'utf-8',
+        'utf-16-le',  # Windows Notepad default
+        'utf-16-be',
+        'utf-16',     # Auto-detect UTF-16 with BOM
+        'latin-1',    # Never fails, but might give wrong chars
+    ]
+    
+    for encoding in encodings:
+        try:
+            text = raw_bytes.decode(encoding)
+            # Check if decode produced valid text (not just bytes-as-unicode)
+            if text and not text.startswith('\ufffd'):  # Not replacement character
+                return text
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    
+    # Fallback: UTF-8 with replacement characters
+    return raw_bytes.decode('utf-8', errors='replace')
+
+
 def is_valid_question(q: Dict, expected_options: int = 4, question_type: str = "single") -> bool:
     """
     Hard validation gate for question quality.
@@ -694,7 +721,7 @@ async def preprocess_transcript_endpoint(file: UploadFile = File(...)):
         doc = Document(io.BytesIO(raw))
         text = " ".join(p.text for p in doc.paragraphs)
     else:
-        text = raw.decode("utf-8", errors="ignore")
+        text = decode_text_file(raw)
 
     # Calculate original stats
     original_length = len(text)
@@ -766,7 +793,7 @@ async def generate_questions(
             doc = Document(io.BytesIO(raw))
             text = " ".join(p.text for p in doc.paragraphs)
         else:
-            text = raw.decode("utf-8", errors="ignore")
+            text = decode_text_file(raw)
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")

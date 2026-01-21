@@ -58,7 +58,15 @@ export function QuestionBank() {
         const response = await fetch('http://127.0.0.1:8001/api/question-sets');
         
         if (!response.ok) {
-          throw new Error(`Failed to fetch questions: ${response.statusText}`);
+          const text = await response.text();
+          let errorMessage = `Failed to fetch questions: ${response.statusText}`;
+          try {
+            const errorData = JSON.parse(text);
+            errorMessage = errorData.detail || errorMessage;
+          } catch {
+            errorMessage = text || errorMessage;
+          }
+          throw new Error(errorMessage);
         }
         
         const data = await response.json();
@@ -230,7 +238,15 @@ export function QuestionBank() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to update questions');
+        const text = await response.text();
+        let errorMessage = 'Failed to update questions';
+        try {
+          const errorData = JSON.parse(text);
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       setHasChanges(false);

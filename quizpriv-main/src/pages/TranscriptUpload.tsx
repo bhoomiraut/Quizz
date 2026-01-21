@@ -180,7 +180,15 @@ export function TranscriptUpload() {
         });
 
         if (!preprocessResponse.ok) {
-          throw new Error('Failed to preprocess transcript');
+          const text = await preprocessResponse.text();
+          let errorMessage = 'Failed to preprocess transcript';
+          try {
+            const errorData = JSON.parse(text);
+            errorMessage = errorData.detail || errorMessage;
+          } catch {
+            errorMessage = text || errorMessage;
+          }
+          throw new Error(errorMessage);
         }
 
         const preprocessData = await preprocessResponse.json();
@@ -261,11 +269,11 @@ export function TranscriptUpload() {
 
       if (!response.ok) {
         let errorMessage = `HTTP error! status: ${response.status}`;
+        const text = await response.text();
         try {
-          const errorData = await response.json();
+          const errorData = JSON.parse(text);
           errorMessage = errorData.detail || errorMessage;
         } catch {
-          const text = await response.text();
           errorMessage = text || errorMessage;
         }
         throw new Error(errorMessage);
