@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Brain, AlertTriangle, AlertCircle, CheckCircle, XCircle, RefreshCw, Flag, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
+import { API_BASE_URL } from "../config";
+
 interface ValidationResult {
   question_id: string;
   question: string;
@@ -117,7 +119,7 @@ export function AIQuizAnswering() {
       setValidating(true);
       setError(null);
 
-      const response = await fetch('http://127.0.0.1:8001/api/ai-validate', {
+      const response = await fetch(`${API_BASE_URL}/api/ai-validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

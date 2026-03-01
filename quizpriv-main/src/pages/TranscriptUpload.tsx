@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Upload, FileText, Clock, Calendar, Tag, AlertCircle, CheckCircle, ChevronDown, ChevronUp, Loader } from 'lucide-react';
 
+import { API_BASE_URL } from '../config';
+
 export function TranscriptUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -174,10 +176,10 @@ export function TranscriptUpload() {
         const preprocessFormData = new FormData();
         preprocessFormData.append('file', file);
 
-        const preprocessResponse = await fetch('/api/preprocess', {
+        const preprocessResponse = await fetch(`${API_BASE_URL}/api/preprocess`, {
           method: 'POST',
           body: preprocessFormData,
-        });
+      });
 
         if (!preprocessResponse.ok) {
           const text = await preprocessResponse.text();
@@ -260,7 +262,7 @@ export function TranscriptUpload() {
         queryParams.append('single_correct_percentage', singleCorrectPercentage.toString());
       }
       
-      const response = await fetch(`/api/generate-questions?${queryParams}`, {
+      const response = await fetch(`${API_BASE_URL}/api/generate-questions?${queryParams}`, {
         method: 'POST',
         body: formData,
       });

@@ -3,6 +3,8 @@ import { ChevronDown, ChevronRight, Edit2, Trash2, Check, Copy, Search, Save, Do
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+import { API_BASE_URL } from "../config";
+
 interface Question {
   id: string | number;
   question: string;
@@ -55,7 +57,7 @@ export function QuestionBank() {
         setError(null);
         
         // Fetch question sets from backend
-        const response = await fetch('http://127.0.0.1:8001/api/question-sets');
+        const response = await fetch(`${API_BASE_URL}/api/question-sets`);
         
         if (!response.ok) {
           const text = await response.text();
@@ -227,7 +229,7 @@ export function QuestionBank() {
 
     setIsSaving(true);
     try {
-      const response = await fetch(`http://127.0.0.1:8001/api/question-sets/${currentQuestionSetId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/question-sets/${currentQuestionSetId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
