@@ -68,9 +68,14 @@ client = Groq(api_key=GROQ_API_KEY)
 # ---------------- APP ----------------
 app = FastAPI(title="LangChain Quiz Generator", version="2.1")
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://feature-frontend-env-config.dp9upd4hl1qsh.amplifyapp.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
